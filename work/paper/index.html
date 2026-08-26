@@ -34,9 +34,14 @@
 </div>
 
 <h2>1. Introduction</h2>
-<p>Content decays. A page that once ranked well and attracted clicks often loses visibility over time. For a content editor with limited capacity, the question is not <em>which pages are declining</em> (that is known after the fact) but <em>which pages should be reviewed <strong>first</strong> to prevent an impending decline.</em> This is a ranking problem: out of thousands of visible pages, which ones are most likely to under‑perform their ranking position and lose clicks?</p>
+
+<p>FlyRank builds content as infrastructure: it researches, writes, publishes, and optimises content at scale. For each client, the system tracks thousands of pages across search results. Over time, content that once ranked well and attracted clicks quietly decays – rankings slip, clicks drop, and by the time a human notices, the opportunity is lost.</p>
+
+<p>The valuable decision is not "which pages are declining" – that is known after the fact. The valuable decision is <em>which pages should a human review <strong>first</strong></em> to prevent an impending decline? This is a ranking problem: out of thousands of visible pages, which ones are most likely to under‑perform their ranking position and lose clicks?</p>
 
 <p>We framed the decision as a CTR‑based opportunity score. The action is a human review of title, meta description, or snippet content. The cost of a false positive is wasted editor time; a false negative means a missed opportunity to protect traffic. We chose this lane because CTR is directly observable and can be compared within the same search position tier, controlling for the dominant confounder of click‑through rate.</p>
+
+<p>This case study is built entirely on pseudonymised FlyRank data. The goal is a decision‑support tool that helps editors triage their workload – not a system that replaces human judgment or claims to predict Google's algorithm.</p>
 
 <h2>2. Data</h2>
 <p>We used the <strong>FlyRank internship warehouse</strong>, hosted on Hugging Face, which contains daily search performance data for content items. The main table is <code>fact_content_daily_performance</code>, partitioned by month. We focused on <strong>March 2026</strong>, the development month. After filtering for <code>gsc_data_available = TRUE</code> and <code>gsc_impressions > 0</code>, we worked with 3.6 million daily rows, aggregating to 77,540 content items with at least 100 impressions in the first 15 days.</p>
