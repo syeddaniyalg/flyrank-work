@@ -22,7 +22,6 @@
     .footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #e2e8f0; font-size: 0.9rem; color: #475569; }
     a { color: #2563eb; text-decoration: none; }
     a:hover { text-decoration: underline; }
-    .bib { font-size: 0.9rem; padding-left: 1.5rem; text-indent: -1.5rem; margin: 0.3rem 0; }
   </style>
 </head>
 <body>
@@ -44,7 +43,8 @@
 <p>This case study is built entirely on pseudonymised FlyRank data. The goal is a decision‑support tool that helps editors triage their workload – not a system that replaces human judgment or claims to predict Google's algorithm.</p>
 
 <h2>2. Data</h2>
-<p>We used the <strong>FlyRank internship warehouse</strong>, hosted on Hugging Face, which contains daily search performance data for content items. The main table is <code>fact_content_daily_performance</code>, partitioned by month. We focused on <strong>March 2026</strong>, the development month. After filtering for <code>gsc_data_available = TRUE</code> and <code>gsc_impressions > 0</code>, we worked with 3.6 million daily rows, aggregating to 77,540 content items with at least 100 impressions in the first 15 days.</p>
+
+<p>We used the <strong>FlyRank internship warehouse</strong>, hosted on Hugging Face, which contains daily search performance data for content items. The main table is <code>fact_content_daily_performance</code>, partitioned by month. We focused on <strong>March 2026</strong>, the development month. After filtering for <code>gsc_data_available = TRUE</code> and <code>gsc_impressions > 0</code>, we worked with 3.6 million daily rows, aggregating to 77,540 content items with at least 100 impressions in the first 15 days. After requiring a matching row in the second 15‑day window, the final modeling frame contained <strong>77,400</strong> content items. All reported Precision@K results are on this final frame.</p>
 
 <p><strong>Excluded columns:</strong> GA4 engagement columns were excluded because <code>ga4_data_available</code> is three‑valued and often zero‑filled before a client’s GA4 start date. AI referral columns were too sparse to support stable comparisons.</p>
 
@@ -65,7 +65,7 @@
 <p>This is an observed, within‑month comparison; it does not require a proxy or a future window beyond the development month.</p>
 
 <h3>3.2 Baseline rule</h3>
-<p>We built a transparent hand‑written rule that a human could read:</p>
+<p>We built a transparent hand‑written rule:</p>
 <pre><code>good_tier = position_tier in ["top_3","page_1","striking"]
 positive_gap = (tier_avg_ctr - ctr_prev) > 0
 score = good_tier * positive_gap * (tier_avg_ctr - ctr_prev) * impressions_prev</code></pre>
@@ -105,20 +105,19 @@ score = good_tier * positive_gap * (tier_avg_ctr - ctr_prev) * impressions_prev<
 <ul>
   <li><strong>Observational, not causal:</strong> We measure association, not causation. A high predicted decline does not imply that changing the title <em>will</em> improve CTR.</li>
   <li><strong>Single month:</strong> The model was trained and validated only on March 2026 data. Performance on other months is unknown.</li>
-  <li><strong>Two features only:</strong> We deliberately kept features minimal for interpretability; the model does not capture content quality, query intent, or SERP features.</li>
-  <li><strong>Client‑grouped split:</strong> While it prevents client leakage, it may still not generalise to new clients with different search profiles.</li>
-  <li><strong>Volume floor:</strong> We filtered to pages with at least 100 impressions; predictions for lower‑volume pages are not reliable.</li>
+  <li><strong>Two features only:</strong> The model does not capture content quality, query intent, or SERP features.</li>
+  <li><strong>Client‑grouped split:</strong> While it prevents client leakage, it may still not generalise to new clients.</li>
+  <li><strong>Volume floor:</strong> Predictions are only reliable for pages with at least 100 impressions.</li>
 </ul>
 
 <h2>6. Ranked Recommendations (Action Playbook)</h2>
 
-<p>The model output is a ranked queue with three action levels, each with a reason code:</p>
-
+<p>The model output is a ranked queue with three action levels:</p>
 <ul>
-  <li><strong>Review title + content</strong> – for pages with decline_prob ≥ 0.8 and impressions_prev ≥ 1000 (none in this dataset).</li>
-  <li><strong>Review title snippet</strong> – for pages with decline_prob ≥ 0.6 and impressions_prev ≥ 500 (24,143 pages).</li>
-  <li><strong>Monitor next cycle</strong> – for pages with decline_prob ≥ 0.5 and impressions_prev ≥ 100 (12,917 pages).</li>
-  <li><strong>No action</strong> – remaining (40,340 pages).</li>
+  <li><strong>Review title + content:</strong> decline_prob ≥ 0.8 and impressions_prev ≥ 1000 (0 pages in this dataset).</li>
+  <li><strong>Review title snippet:</strong> decline_prob ≥ 0.6 and impressions_prev ≥ 500 (23,962 pages).</li>
+  <li><strong>Monitor next cycle:</strong> decline_prob ≥ 0.5 and impressions_prev ≥ 100 (13,499 pages).</li>
+  <li><strong>No action:</strong> remaining (39,939 pages).</li>
 </ul>
 
 <p><strong>Reason codes</strong> are concatenated flags: e.g., <code>high_decline_prob_high_visibility_good_position</code>. The queue is intended for <strong>decision support</strong>; a human editor must verify the page’s intent, recent updates, and SERP context before taking any action.</p>
