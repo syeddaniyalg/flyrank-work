@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CTR Decline Prediction: A Decision-Support Model for Content Review</title>
+  <style>
+    /* minimal, readable */
+    body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; line-height: 1.6; color: #1e293b; background: #fafafa; }
+    h1, h2, h3 { line-height: 1.2; margin-top: 2rem; }
+    h1 { font-size: 2rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.3rem; }
+    h2 { font-size: 1.5rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.2rem; }
+    h3 { font-size: 1.2rem; margin-top: 1.5rem; }
+    table { border-collapse: collapse; width: 100%; margin: 1.5rem 0; font-size: 0.95rem; }
+    th, td { border: 1px solid #cbd5e1; padding: 0.5rem 0.8rem; text-align: left; }
+    th { background: #e2e8f0; }
+    code { background: #e2e8f0; padding: 0.1rem 0.3rem; border-radius: 4px; font-size: 0.9rem; }
+    .figure { margin: 1.5rem 0; text-align: center; }
+    .figure img { max-width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; }
+    .caption { font-size: 0.9rem; color: #475569; margin-top: 0.3rem; }
+    .abstract { background: #f1f5f9; padding: 1rem 1.5rem; border-left: 4px solid #2563eb; margin: 1.5rem 0; }
+    .footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #e2e8f0; font-size: 0.9rem; color: #475569; }
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .bib { font-size: 0.9rem; padding-left: 1.5rem; text-indent: -1.5rem; margin: 0.3rem 0; }
+  </style>
+</head>
+<body>
+
+<h1>CTR Decline Prediction: A Decision-Support Model for Content Review</h1>
+
+<div class="abstract">
+  <p><strong>Abstract</strong> – We built a predictive ranking model to help content editors prioritise pages that are likely to experience a click‑through rate (CTR) decline. Using 3.6 million daily search performance records from the FlyRank internship warehouse, we aggregated impressions and average position over the first 15 days of March 2026 as features, and defined the label as a CTR drop between the first and second halves of the month. A Random Forest classifier, validated on a client‑held‑out split, achieved a Precision@50 of 0.84, compared to a hand‑written baseline rule of 0.52 (base rate ~0.40). The model provides a directional signal for editorial triage and is accompanied by a transparent action playbook with reason codes and human review guidelines. The work is observational and decision‑support; no causal claims are made.</p>
+</div>
+
+<h2>1. Introduction</h2>
+<p>Content decays. A page that once ranked well and attracted clicks often loses visibility over time. For a content editor with limited capacity, the question is not <em>which pages are declining</em> (that is known after the fact) but <em>which pages should be reviewed <strong>first</strong> to prevent an impending decline.</em> This is a ranking problem: out of thousands of visible pages, which ones are most likely to under‑perform their ranking position and lose clicks?</p>
+
+<p>We framed the decision as a CTR‑based opportunity score. The action is a human review of title, meta description, or snippet content. The cost of a false positive is wasted editor time; a false negative means a missed opportunity to protect traffic. We chose this lane because CTR is directly observable and can be compared within the same search position tier, controlling for the dominant confounder of click‑through rate.</p>
+
+<h2>2. Data</h2>
+<p>We used the <strong>FlyRank internship warehouse</strong>, hosted on Hugging Face, which contains daily search performance data for content items. The main table is <code>fact_content_daily_performance</code>, partitioned by month. We focused on <strong>March 2026</strong>, the development month. After filtering for <code>gsc_data_available = TRUE</code> and <code>gsc_impressions > 0</code>, we worked with 3.6 million daily rows, aggregating to 77,540 content items with at least 100 impressions in the first 15 days.</p>
+
+<p><strong>Excluded columns:</strong> GA4 engagement columns were excluded because <code>ga4_data_available</code> is three‑valued and often zero‑filled before a client’s GA4 start date. AI referral columns were too sparse to support stable comparisons.</p>
+
+<h2>3. Methodology</h2>
+
+<h3>3.1 Feature and label definition</h3>
+<p>We used two features, both computed from the <strong>first 15 days</strong> of March 2026:</p>
+<ul>
+  <li><code>impressions_prev</code> – total search impressions</li>
+  <li><code>avg_position_prev</code> – average ranking position</li>
+</ul>
+<p>The label was defined on the <strong>second 15 days</strong>:</p>
+<ul>
+  <li><code>ctr_prev</code> = clicks_prev / impressions_prev (first half)</li>
+  <li><code>ctr_curr</code> = clicks_curr / impressions_curr (second half)</li>
+  <li><code>is_declining_label</code> = 1 if <code>ctr_curr &lt; ctr_prev</code>, else 0</li>
+</ul>
+<p>This is an observed, within‑month comparison; it does not require a proxy or a future window beyond the development month.</p>
+
+<h3>3.2 Baseline rule</h3>
+<p>We built a transparent hand‑written rule that a human could read:</p>
+<pre><code>good_tier = position_tier in ["top_3","page_1","striking"]
+positive_gap = (tier_avg_ctr - ctr_prev) > 0
+score = good_tier * positive_gap * (tier_avg_ctr - ctr_prev) * impressions_prev</code></pre>
+<p>This rule flags pages that are in good positions, have below‑tier‑average CTR, and weights the gap by volume.</p>
+
+<h3>3.3 Model</h3>
+<p>We trained a <strong>Random Forest classifier</strong> (300 trees, max depth 6, class_weight balanced) on the two features. The model outputs a probability of CTR decline. We used a <strong>client‑grouped split</strong> (GroupShuffleSplit, 80/20) to prevent pages from the same client appearing in both train and test – this is a more honest evaluation than a random split.</p>
+
+<h3>3.4 Leakage checks</h3>
+<p>We deliberately added leaky signals (<code>ctr_prev</code> and <code>ctr_curr</code> together) to the feature set; Precision@50 jumped from 0.84 to 1.00, confirming that these features are unsafe. The final model includes <strong>only</strong> the two pre‑declaration features.</p>
+
+<h2>4. Results</h2>
+
+<p>The Random Forest model outperforms the baseline at all evaluated ranks, with the largest lift at the top of the list.</p>
+
+<table>
+  <thead>
+    <tr><th>K</th><th>Baseline (hand rule) Precision@K</th><th>Random Forest Precision@K</th><th>Base rate</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>20</td><td>0.55</td><td>0.90</td><td>0.403</td></tr>
+    <tr><td>50</td><td>0.52</td><td>0.84</td><td>0.403</td></tr>
+    <tr><td>100</td><td>0.49</td><td>0.72</td><td>0.403</td></tr>
+  </tbody>
+</table>
+
+<p><em>Table: Precision@K on the client‑held‑out test set. The base rate (random pick) is 0.403. The Random Forest achieves a ~1.6× lift at K=50.</em></p>
+
+<div class="figure">
+  <img src="images/decline_prob_distribution.png" alt="Histogram of predicted decline probabilities" style="max-width: 80%;">
+  <div class="caption">Figure 1: Distribution of predicted decline probabilities for all pages in the queue. Most pages have probabilities between 0.4 and 0.6, with a long tail of high‑probability pages.</div>
+</div>
+
+<p><strong>Permutation importance</strong> showed that <code>impressions_prev</code> had a slightly higher importance (0.0966) than <code>avg_position_prev</code> (0.0261), but both are modest – the model relies on a combination of both signals rather than a single dominant feature. About 20‑25% of the top 20 logistic regression picks were false positives, and these tended to have lower impression volumes, reinforcing the need for a volume floor.</p>
+
+<h2>5. Limitations</h2>
+<ul>
+  <li><strong>Observational, not causal:</strong> We measure association, not causation. A high predicted decline does not imply that changing the title <em>will</em> improve CTR.</li>
+  <li><strong>Single month:</strong> The model was trained and validated only on March 2026 data. Performance on other months is unknown.</li>
+  <li><strong>Two features only:</strong> We deliberately kept features minimal for interpretability; the model does not capture content quality, query intent, or SERP features.</li>
+  <li><strong>Client‑grouped split:</strong> While it prevents client leakage, it may still not generalise to new clients with different search profiles.</li>
+  <li><strong>Volume floor:</strong> We filtered to pages with at least 100 impressions; predictions for lower‑volume pages are not reliable.</li>
+</ul>
+
+<h2>6. Ranked Recommendations (Action Playbook)</h2>
+
+<p>The model output is a ranked queue with three action levels, each with a reason code:</p>
+
+<ul>
+  <li><strong>Review title + content</strong> – for pages with decline_prob ≥ 0.8 and impressions_prev ≥ 1000 (none in this dataset).</li>
+  <li><strong>Review title snippet</strong> – for pages with decline_prob ≥ 0.6 and impressions_prev ≥ 500 (24,143 pages).</li>
+  <li><strong>Monitor next cycle</strong> – for pages with decline_prob ≥ 0.5 and impressions_prev ≥ 100 (12,917 pages).</li>
+  <li><strong>No action</strong> – remaining (40,340 pages).</li>
+</ul>
+
+<p><strong>Reason codes</strong> are concatenated flags: e.g., <code>high_decline_prob_high_visibility_good_position</code>. The queue is intended for <strong>decision support</strong>; a human editor must verify the page’s intent, recent updates, and SERP context before taking any action.</p>
+
+<p><strong>No‑go items:</strong> Do not automate rewriting; do not use for pages with fewer than 100 impressions; do not treat as causal proof.</p>
+
+<h2>7. Reproducibility</h2>
+<p>All code is available in the <a href="https://github.com/syeddaniyalg/flyrank-work">public repository</a>. The complete analysis is organised in notebooks under <code>work/notebooks/</code>:</p>
+<ul>
+  <li><code>w03_data_contract.ipynb</code> – data grain, filters, leakage trap</li>
+  <li><code>w04_baseline_score.ipynb</code> – baseline rule construction</li>
+  <li><code>w04_signal_audit.ipynb</code> – distribution and signal tests</li>
+  <li><code>w05_model.ipynb</code> – model training, evaluation, and comparison</li>
+  <li><code>w06_validation_audit.ipynb</code> – honest split and leakage audit</li>
+  <li><code>w07_action_playbook.ipynb</code> – ranked actions and export</li>
+</ul>
+<p>To rerun: clone the repo, set the <code>HF_TOKEN</code> environment variable, and run the notebooks in order. All random seeds are fixed (42).</p>
+
+<h2>8. Acknowledgments & Data Credit</h2>
+<p>This work was built on the <strong>FlyRank ML Internship dataset</strong> – a pseudonymised warehouse of real search performance data. We thank FlyRank for providing access to this production‑grade data and for the opportunity to work on this problem.</p>
+<p>Data source: <a href="https://flyrank.ai" target="_blank">FlyRank</a> – The State of AI‑Driven SEO in Numbers (March 2026).</p>
+
+<div class="footer">
+  <p><em>This paper is a capstone project for the FlyRank ML Internship track. All claims are observational and directional; no causal statements are made.</em></p>
+  <p>Published: August 2026 &bull; <a href="https://github.com/syeddaniyalg/flyrank-work">Repository</a></p>
+</div>
+
+</body>
+</html>
